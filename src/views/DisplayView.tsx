@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 //TODO: colocar canal video digital
 
 export default function DisplayView() {
-  const { tickets, fetchTickets } = useTicketStore();
+  const { tickets, fetchTickets, deleteTicket } = useTicketStore();
   const [lastPlayedTicket, setLastPlayedTicket] = useState(null);
   const [notification] = useState(() => typeof Audio !== 'undefined' ? new Audio('/notification.mp3') : null);
 
@@ -52,6 +52,7 @@ export default function DisplayView() {
       2: { label: 'Preferencial', color: 'bg-amber-100 text-amber-800' },
       3: { label: 'VIP', color: 'bg-emerald-100 text-emerald-800' }
     };
+    
     const category = categories[categoryId] || categories[1];
     
     return (
@@ -96,7 +97,7 @@ export default function DisplayView() {
                       {ticket.customer_name || 'Cliente'}
                     </div>
                     <div className="text-xl font-bold text-blue-500 bg-blue-50 rounded-full py-2 px-4 inline-block">
-                      Módulo {ticket.counter}
+                      Caja {ticket.counter}
                     </div>
                   </div>
                 </div>
@@ -189,7 +190,7 @@ export default function DisplayView() {
                         {ticket.customer_name || 'Cliente'}
                       </span>
                       <span className="text-xs text-gray-500">
-                        Módulo {ticket.counter}
+                        Caja {ticket.counter}
                       </span>
                     </div>
                   </div>

@@ -11,9 +11,46 @@ const db = new Database(join(__dirname, 'turnos.db'));
 
 const app = express();
 const httpServer = createServer(app);
+
+// Configuración de CORS
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+// Parsear JSON y URL-encoded bodies
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Middleware para logging
+app.use((req, res, next) => {
+  console.log('Request:', {
+    method: req.method,
+    url: req.url,
+    body: req.body,
+    headers: req.headers
+  });
+  next();
+});
+
+// Middleware para debug de requests
+app.use((req, res, next) => {
+  if (req.method === 'POST') {
+    console.log('POST Request Debug:', {
+      url: req.url,
+      headers: req.headers,
+      body: req.body,
+      rawBody: req.rawBody
+    });
+  }
+  next();
+});
+
+// Configuración de Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: true, // Permite todos los orígenes en desarrollo
+    credentials: true,
     methods: ["GET", "POST"]
   }
 });
@@ -44,6 +81,8 @@ db.exec(`
     customer_name TEXT,
     contact_info TEXT,
     additional_notes TEXT,
+    technical_notes TEXT,
+    type TEXT,
     FOREIGN KEY (category_id) REFERENCES categories (id)
   );
 
@@ -74,9 +113,6 @@ db.exec(`
     (42, 'Solicitud de Compensación', 'SC', 2, 'compensation', 30)
 `);
 
-app.use(cors());
-app.use(express.json());
-
 // Improved Ticket Number Generation
 function getNextNumber(prefix, currentDate) {
   const stmt = db.prepare(`
@@ -101,70 +137,127 @@ function getNextNumber(prefix, currentDate) {
   return `${prefix}${String(nextNumber).padStart(3, '0')}`;
 }
 
-// Enhanced Ticket Creation
-app.post('/api/tickets', (req, res) => {
-  const { 
-    categoryId = 1, 
-    customerName = '',
-    contactInfo = '',
-    additionalNotes = '',
-    complexityFactor = 1
-  } = req.body;
+app.delete('/tickets/:id', (req, res) => {
+  const { id } = req.params;
   
-  const currentDate = new Date().toISOString();
-  
-  console.log('Creating ticket with categoryId:', categoryId);
-  
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
-  
-  if (!category) {
-    console.error(`Category with ID ${categoryId} not found`);
-    return res.status(404).json({ 
-      error: 'Category not found', 
-      message: `No category exists with ID ${categoryId}` 
+  try {
+    // First, verify that the ticket exists
+    const existingTicket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+    
+    if (!existingTicket) {
+      return res.status(404).json({ 
+        error: 'Ticket not found', 
+        message: `No ticket found with ID ${id}` 
+      });
+    }
+
+    // Delete the ticket
+    const stmt = db.prepare('DELETE FROM tickets WHERE id = ?');
+    const result = stmt.run(id);
+
+    if (result.changes === 0) {
+      return res.status(500).json({ 
+        error: 'Delete failed', 
+        message: 'No ticket was deleted' 
+      });
+    }
+
+    // Emit a socket event if needed
+    io.emit('ticketDeleted', { id });
+
+    res.json({ 
+      message: 'Ticket deleted successfully', 
+      id 
+    });
+  } catch (error) {
+    console.error('Error deleting ticket:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete ticket', 
+      message: error.message 
     });
   }
-  
-  const ticketNumber = getNextNumber(category.prefix, currentDate);
-  
-  const estimatedTime = Math.max(
-    category.estimated_service_time * complexityFactor, 
-    10
-  );
-  
-  const stmt = db.prepare(`
-    INSERT INTO tickets (
-      number, category_id, priority, estimated_time, 
-      complexity, customer_name, contact_info, additional_notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  
-  const result = stmt.run(
-    ticketNumber, 
-    categoryId, 
-    category.priority, 
-    estimatedTime,
-    complexityFactor,
-    customerName,
-    contactInfo,
-    additionalNotes
-  );
-  
-  const ticket = db.prepare(`
-    SELECT t.*, c.name as category_name, c.prefix, c.type
-    FROM tickets t
-    JOIN categories c ON t.category_id = c.id
-    WHERE t.id = ?
-  `).get(result.lastInsertRowid);
-  
-  console.log('Created ticket:', ticket);
-  
-  io.emit('newTicket', ticket);
-  res.json(ticket);
+});
+
+// Enhanced Ticket Creation
+app.post('/tickets', (req, res) => {
+  try {
+    const { 
+      categoryId,
+      customerName = '',
+      contactInfo = '',
+      additionalNotes = '',
+      complexityFactor = 1
+    } = req.body;
+    
+    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(categoryId);
+    
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    
+    const ticketNumber = getNextNumber(category.prefix, new Date().toISOString());
+    
+    // Asignar automáticamente a cajas de servicio técnico si corresponde
+    let counter = null;
+    if (category.type === 'tech_support' || category.type === 'hardware' || category.type === 'network') {
+      // Asignar alternadamente entre las cajas 5 y 6 (servicio técnico)
+      const lastTechTicket = db.prepare(`
+        SELECT counter 
+        FROM tickets 
+        WHERE category_id IN (
+          SELECT id FROM categories 
+          WHERE type IN ('tech_support', 'hardware', 'network')
+        )
+        ORDER BY id DESC 
+        LIMIT 1
+      `).get();
+      
+      counter = lastTechTicket?.counter === 5 ? 6 : 5;
+    }
+
+    const stmt = db.prepare(`
+      INSERT INTO tickets (
+        number, category_id, priority, estimated_time, 
+        complexity, customer_name, contact_info, additional_notes,
+        counter
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    const result = stmt.run(
+      ticketNumber,
+      categoryId,
+      category.priority,
+      category.estimated_service_time * complexityFactor,
+      complexityFactor,
+      customerName,
+      contactInfo,
+      additionalNotes,
+      counter
+    );
+    
+    const ticket = db.prepare(`
+      SELECT t.*, c.name as category_name, c.prefix, c.type
+      FROM tickets t
+      JOIN categories c ON t.category_id = c.id
+      WHERE t.id = ?
+    `).get(result.lastInsertRowid);
+    
+    console.log('Created ticket:', ticket);
+    
+    io.emit('newTicket', ticket);
+    res.json(ticket);
+  } catch (error) {
+    console.error('Error creating ticket:', error);
+    res.status(500).json({
+      error: 'Failed to create ticket',
+      message: error.message,
+      details: error.stack
+    });
+  }
 });
 
 // Enhanced Ticket Retrieval
-app.get('/api/tickets', (req, res) => {
+app.get('/tickets', (req, res) => {
   const { type, status, priority } = req.query;
   
   let query = `
@@ -212,119 +305,85 @@ app.get('/api/tickets', (req, res) => {
 });
 
 // Enhanced Ticket Update
-app.put('/api/tickets/:id', (req, res) => {
+app.put('/tickets/:id', (req, res) => {
   const { id } = req.params;
   const { 
     status, 
-    counter, 
-    subStatus,
-    resolutionNotes = ''
+    counter,
+    technical_notes 
   } = req.body;
   
-  const stmt = db.prepare(`
-    UPDATE tickets 
-    SET 
-      status = ?, 
-      counter = ?, 
-      sub_status = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-  stmt.run(status, counter, subStatus, id);
-  
-  const ticket = db.prepare(`
-    SELECT t.*, c.name as category_name, c.prefix, c.type
-    FROM tickets t
-    JOIN categories c ON t.category_id = c.id
-    WHERE t.id = ?
-  `).get(id);
-  
-  io.emit('ticketUpdate', ticket);
-  res.json(ticket);
-});
+  try {
+    // First, verify that the ticket exists
+    const existingTicket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
+    
+    if (!existingTicket) {
+      return res.status(404).json({ 
+        error: 'Ticket not found', 
+        message: `No ticket found with ID ${id}` 
+      });
+    }
 
-// Enhanced Ticket Retrieval with More Filtering Options
-app.get('/api/tickets', (req, res) => {
-  const { type, status, priority } = req.query;
-  
-  let query = `
-    SELECT t.*, c.name as category_name, c.prefix, c.type
-    FROM tickets t
-    JOIN categories c ON t.category_id = c.id
-    WHERE DATE(t.created_at) = DATE('now')
-  `;
-  
-  const conditions = [];
-  const params = [];
-  
-  if (type) {
-    conditions.push('c.type = ?');
-    params.push(type);
-  }
-  
-  if (status) {
-    conditions.push('t.status = ?');
-    params.push(status);
-  }
-  
-  if (priority) {
-    conditions.push('t.priority = ?');
-    params.push(priority);
-  }
-  
-  if (conditions.length > 0) {
-    query += ' AND ' + conditions.join(' AND ');
-  }
-  
-  query += `
-    ORDER BY 
-      CASE t.status
-        WHEN 'waiting' THEN 1
-        WHEN 'serving' THEN 2
-        WHEN 'completed' THEN 3
-      END,
-      t.priority DESC,
-      t.created_at ASC
-  `;
-  
-  const tickets = db.prepare(query).all(...params);
-  res.json(tickets);
-});
+    // Add more comprehensive logging
+    console.log('Updating ticket:', {
+      id,
+      status,
+      counter,
+      technical_notes
+    });
 
-// Enhanced Ticket Update with More Status Options
-app.put('/api/tickets/:id', (req, res) => {
-  const { id } = req.params;
-  const { 
-    status, 
-    counter, 
-    subStatus,
-    resolutionNotes = ''
-  } = req.body;
-  
-  const stmt = db.prepare(`
-    UPDATE tickets 
-    SET 
-      status = ?, 
-      counter = ?, 
-      sub_status = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-  stmt.run(status, counter, subStatus, id);
-  
-  const ticket = db.prepare(`
-    SELECT t.*, c.name as category_name, c.prefix, c.type
-    FROM tickets t
-    JOIN categories c ON t.category_id = c.id
-    WHERE t.id = ?
-  `).get(id);
-  
-  io.emit('ticketUpdate', ticket);
-  res.json(ticket);
+    const stmt = db.prepare(`
+      UPDATE tickets 
+      SET 
+        status = ?, 
+        counter = ?, 
+        technical_notes = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    
+    const result = stmt.run(
+      status || existingTicket.status, 
+      counter !== undefined ? counter : existingTicket.counter, 
+      technical_notes ? JSON.stringify(technical_notes) : null, // Ensure proper handling
+      id
+    );
+
+    // Check if any rows were actually updated
+    if (result.changes === 0) {
+      return res.status(500).json({ 
+        error: 'Update failed', 
+        message: 'No changes were made to the ticket' 
+      });
+    }
+    
+    const ticket = db.prepare(`
+      SELECT t.*, c.name as category_name, c.prefix, c.type
+      FROM tickets t
+      JOIN categories c ON t.category_id = c.id
+      WHERE t.id = ?
+    `).get(id);
+    
+    io.emit('ticketUpdate', ticket);
+    res.json(ticket);
+  } catch (error) {
+    console.error('Detailed error updating ticket:', {
+      id,
+      body: req.body,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : 'No stack trace'
+    });
+
+    res.status(500).json({ 
+      error: 'Failed to update ticket', 
+      message: error instanceof Error ? error.message : 'Unknown error',
+      details: error instanceof Error ? error.stack : null
+    });
+  }
 });
 
 // New endpoint to fetch categories
-app.get('/api/categories', (req, res) => {
+app.get('/categories', (req, res) => {
   try {
     const categories = db.prepare(`
       SELECT 
@@ -373,7 +432,7 @@ function getCategoryDescription(categoryId) {
 }
 
 // Enhanced Statistics Endpoint
-app.get('/api/stats', (req, res) => {
+app.get('/stats', (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
 
@@ -442,4 +501,8 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Available on:');
+  console.log(`  http://localhost:${PORT}`);
+  console.log(`  http://127.0.0.1:${PORT}`);
+  console.log(`  http://192.168.1.5:${PORT} (Local Network)`);
 });

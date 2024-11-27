@@ -4,15 +4,20 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "preview": "vite preview",
+    "serve": "serve -s dist",
     "dev": "vite",
     "build": "vite build",
     "server": "node server/index.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "lint": "eslint ."
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.9.1",
+    "@radix-ui/react-alert-dialog": "^1.1.2",
     "@radix-ui/react-avatar": "^1.1.1",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-label": "^2.1.0",
     "@radix-ui/react-progress": "^1.1.0",
     "@radix-ui/react-scroll-area": "^1.2.1",
     "@radix-ui/react-select": "^2.1.2",
@@ -30,11 +35,14 @@
     "qrcode.react": "^4.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-hook-form": "^7.53.2",
     "react-router-dom": "^6.22.3",
+    "serve": "^14.2.4",
     "socket.io": "^4.7.4",
     "socket.io-client": "^4.7.4",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.23.8",
     "zustand": "^4.5.2"
   },
   "devDependencies": {
@@ -48,6 +56,7 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.5.3",
-    "vite": "^5.4.2"
+    "vite": "^5.4.2",
+    "vite-plugin-pwa": "^0.21.0"
   }
 }

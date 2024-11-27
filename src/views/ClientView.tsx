@@ -1,72 +1,25 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Users, CreditCard, AlertCircle, HelpCircle, PhoneCall, X, Clock } from 'lucide-react';
 import { useTicketStore } from "../lib/store";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Clock, Users, CheckCircle } from 'lucide-react';
+import { toast } from "@/hooks/use-toast";
 import CategoryCard from "../components/CategoryCard";
-import QRCodeComponent from "../components/QRCode";
+import type { Category } from "@/lib/types";
+import { Progress } from "@/components/ui/progress";
 
 const ClientView: React.FC = () => {
-  const { createTicket, categories, fetchCategories, stats, tickets } = useTicketStore();
-  const [isCreatingTicket, setIsCreatingTicket] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
-  const [currentView, setCurrentView] = useState('name');
+  const { createTicket, categories, fetchCategories, loading, tickets } = useTicketStore();
   const [name, setName] = useState('');
+  const [currentView, setCurrentView] = useState('name');
   const [fadeOut, setFadeOut] = useState(false);
 
   useEffect(() => {
     fetchCategories();
   }, [fetchCategories]);
-
-  const calculateEstimatedTime = useCallback((categoryId: number) => {
-    const waitingTickets = tickets.filter((t) => t.status === "waiting");
-    const categoryTickets = waitingTickets.filter(
-      (t) => t.category_id === categoryId
-    );
-
-    let baseTime;
-    switch (categoryId) {
-      case 1: baseTime = 10; break;
-      case 2: baseTime = 5; break;
-      case 3: baseTime = 15; break;
-      case 4: baseTime = 8; break;
-      case 5: baseTime = 20; break;
-      case 6: baseTime = 12; break;
-      default: baseTime = 10;
-    }
-
-    return baseTime;
-  }, [tickets]);
-
-  const getCategoryIcon = useCallback((categoryId: number) => {
-    switch (categoryId) {
-      case 1: return Users;
-      case 2: return CreditCard;
-      case 3: return AlertCircle;
-      case 4: return HelpCircle;
-      case 5: return PhoneCall;
-      case 6: return X;
-      default: return HelpCircle;
-    }
-  }, []);
-
-  const getCategoryColor = useCallback((categoryId: number) => {
-    switch (categoryId) {
-      case 1: return "blue";
-      case 2: return "green";
-      case 3: return "red";
-      case 4: return "purple";
-      case 5: return "indigo";
-      case 6: return "pink";
-      default: return "gray";
-    }
-  }, []);
 
   const handleNameSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,68 +32,113 @@ const ClientView: React.FC = () => {
     }
   };
 
-  const handleCreateTicket = useCallback(async (categoryId: number) => {
-    if (isCreatingTicket) return;
+  const handleCategoryClick = async (category: Category) => {
+    if (loading || !name.trim()) {
+      toast({
+        title: "Error",
+        description: "Por favor, ingrese su nombre para continuar",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
-      setIsCreatingTicket(true);
-      setSelectedCategory(categoryId);
-
-      const estimatedTime = calculateEstimatedTime(categoryId);
-      await createTicket({
-        categoryId,
-        estimatedTime,
+      const ticket = await createTicket({
+        categoryId: category.id,
         customerName: name,
       });
 
-      setFadeOut(true);
-      setTimeout(() => {
-        setCurrentView('thanks');
-        setFadeOut(false);
-      }, 500);
+      if (ticket) {
+        // Mensaje específico para servicio técnico
+        if (category.type?.includes('tech_support') || 
+            category.type === 'hardware' || 
+            category.type === 'network') {
+          toast({
+            title: "Ticket Creado - Servicio Técnico",
+            description: `Su número es ${ticket.number}. Por favor, diríjase a ${
+              ticket.counter === 5 ? 'Servicio Técnico 1' : 'Servicio Técnico 2'
+            }`,
+          });
+        } else {
+          toast({
+            title: "Ticket Creado",
+            description: `Su número es ${ticket.number}. Por favor, espere a ser llamado`,
+          });
+        }
 
-      setTimeout(() => {
         setFadeOut(true);
         setTimeout(() => {
-          setCurrentView('name');
-          setName('');
-          setSelectedCategory(null);
-          setIsCreatingTicket(false);
+          setCurrentView('thanks');
           setFadeOut(false);
         }, 500);
-      }, 5000);
 
+        // Resetear después de 5 segundos
+        setTimeout(() => {
+          setFadeOut(true);
+          setTimeout(() => {
+            setCurrentView('name');
+            setName('');
+            setFadeOut(false);
+          }, 500);
+        }, 5000);
+      }
     } catch (error) {
-      console.error("Error creating ticket:", error);
-    } finally {
-      setIsCreatingTicket(false);
+      console.error('Error creating ticket:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo crear el ticket. Por favor, intente nuevamente.",
+        variant: "destructive",
+      });
     }
-  }, [isCreatingTicket, calculateEstimatedTime, createTicket, name]);
+  };
 
-  const getPeopleWaiting = useCallback((categoryId: number) => {
-    return tickets.filter(
-      (t) => t.status === "waiting" && t.category_id === categoryId
-    ).length;
+  const getWaitingInfo = useCallback(() => {
+    const waitingCount = tickets.filter(t => t.status === "waiting").length;
+    const avgWaitTime = tickets
+      .filter(t => t.status === "completed")
+      .reduce((acc, t) => acc + (t.estimated_time || 0), 0) / Math.max(waitingCount, 1);
+
+    return {
+      waitingCount,
+      avgWaitTime: Math.round(avgWaitTime)
+    };
   }, [tickets]);
 
   return (
-    <div className="min-h-screen bg-blue-50">
-      <header className="bg-white shadow-md">
-        <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between">
-          <div className="flex items-center space-x-4 mb-4 sm:mb-0">
+    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+      <header className="bg-white shadow-sm">
+        <div className="container mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between">
+          <div className="flex items-center space-x-3">
             <img
               src="/logo.png"
-              alt="Video Digital Logo"
+              alt="Logo"
+              className="h-8 w-auto"
             />
-            <h1 className="text-2xl font-bold text-gray-800">Video Digital</h1>
+            <h1 className="text-xl font-bold text-gray-800">Video Digital</h1>
           </div>
-          <p className="text-lg text-gray-600 text-center sm:text-left">
+          {currentView !== 'name' && (
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-500" />
+                <span className="text-gray-600">
+                  En espera: <strong>{getWaitingInfo().waitingCount}</strong>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-amber-500" />
+                <span className="text-gray-600">
+                  Tiempo estimado: <strong>{getWaitingInfo().avgWaitTime} min</strong>
+                </span>
+              </div>
+            </div>
+          )}
+          <p className="text-sm text-gray-500">
             Sistema de Gestión de Turnos
           </p>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8">
         <div className={`transition-all duration-500 ${fadeOut ? 'opacity-0 transform translate-y-4' : 'opacity-100 transform translate-y-0'}`}>
           {currentView === 'name' && (
             <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6 sm:p-8">
@@ -169,35 +167,24 @@ const ClientView: React.FC = () => {
           )}
 
           {currentView === 'categories' && (
-            <div className="space-y-8">
-              <h2 className="text-2xl sm:text-3xl font-bold text-center text-gray-800">
-                Seleccione el tipo de atención
-              </h2>
-              <p className="text-lg sm:text-xl text-center text-gray-600">
-                {name}, por favor elija la categoría que mejor se adapte a su necesidad
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+            <div className="space-y-6">
+              <div className="text-center max-w-2xl mx-auto">
+                <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">
+                  Seleccione el tipo de atención
+                </h2>
+                <p className="text-lg text-gray-600">
+                  Hola {name}, por favor elija la categoría que mejor se adapte a su necesidad
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 max-w-7xl mx-auto">
                 {categories.map((category) => (
-                  <TooltipProvider key={category.id}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <CategoryCard
-                          icon={getCategoryIcon(category.id)}
-                          title={category.name}
-                          description={category.description}
-                          color={getCategoryColor(category.id)}
-                          estimatedTime={calculateEstimatedTime(category.id)}
-                          peopleWaiting={getPeopleWaiting(category.id)}
-                          onClick={() => handleCreateTicket(category.id)}
-                          className="transform transition-all duration-300 hover:scale-105 hover:shadow-xl"
-                          isLoading={isCreatingTicket && selectedCategory === category.id}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Haga clic para generar un turno de {category.name}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <CategoryCard
+                    key={category.id}
+                    category={category}
+                    onClick={() => handleCategoryClick(category)}
+                    isLoading={loading}
+                  />
                 ))}
               </div>
             </div>
@@ -205,63 +192,25 @@ const ClientView: React.FC = () => {
 
           {currentView === 'thanks' && (
             <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6 sm:p-8 text-center space-y-6">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-8 h-8 text-green-600" />
+              </div>
               <h2 className="text-2xl sm:text-3xl font-bold text-gray-800">
                 ¡Gracias {name}!
               </h2>
-              <p className="text-lg sm:text-xl text-gray-600">
-                Su turno ha sido generado exitosamente.
-              </p>
-              <div className="flex items-center justify-center space-x-2 text-lg text-gray-700">
-                <Clock className="w-6 h-6" />
-                <span>Por favor, espere a ser llamado</span>
+              <div className="space-y-2">
+                <p className="text-lg text-gray-600">
+                  Su turno ha sido generado exitosamente.
+                </p>
+                <div className="flex items-center justify-center space-x-2 text-gray-700">
+                  <Clock className="w-5 h-5 text-amber-500" />
+                  <span>Por favor, espere a ser llamado</span>
+                </div>
               </div>
             </div>
           )}
         </div>
-
-        {stats && currentView !== 'thanks' && (
-          <div className="mt-8 sm:mt-12 bg-white rounded-lg shadow-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 sm:p-6 text-white">
-              <h2 className="text-xl sm:text-2xl font-bold mb-2 text-center">
-                Estadísticas en Tiempo Real
-              </h2>
-              <p className="text-center text-blue-100">
-                Información actualizada sobre nuestro servicio
-              </p>
-            </div>
-            <div className="p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              <StatCard
-                title="En Espera"
-                value={stats.waiting_count}
-                description="Personas esperando ser atendidas"
-                color="blue"
-                progress={(stats.waiting_count / (stats.waiting_count + stats.serving_count)) * 100}
-              />
-              <StatCard
-                title="En Atención"
-                value={stats.serving_count}
-                description="Clientes siendo atendidos ahora"
-                color="green"
-                progress={(stats.serving_count / (stats.waiting_count + stats.serving_count)) * 100}
-              />
-              <StatCard
-                title="Tiempo Promedio"
-                value={`${Math.round(stats.avg_wait_time || 0)} min`}
-                description="Tiempo promedio de espera"
-                color="indigo"
-                progress={(stats.avg_wait_time / 30) * 100}
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="mt-8 sm:mt-12 max-w-md mx-auto">
-          <h3 className="text-xl sm:text-2xl font-bold text-center text-gray-800 mb-4 sm:mb-6">
-            ¿Prefiere usar su teléfono?
-          </h3>
-          <QRCodeComponent url="https://192.168.1.5:5173" />
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

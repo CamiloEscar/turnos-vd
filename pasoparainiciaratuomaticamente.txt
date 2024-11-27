@@ -1,0 +1,25 @@
+3. Despliegue del Servidor
+Cuando todo esté listo y configurado localmente, puedes hacer lo siguiente para asegurarte de que el servidor esté accesible de manera más estable:
+
+Hacer que el servidor se ejecute automáticamente: Si la PC del servidor es una máquina que se utiliza exclusivamente para este propósito, podrías configurar el servidor para que se ejecute automáticamente al iniciar la máquina.
+
+Configurar el servidor para producción: Asegúrate de que tu servidor esté optimizado para producción. Usa un proceso como pm2 o forever en Node.js para mantener el servidor corriendo de manera persistente:
+
+bash
+Copiar código
+npm install pm2 -g
+pm2 start server.js  # O el archivo de tu servidor
+pm2 save
+4. Acceso desde Tablets
+Si estás usando tablets y necesitas que la aplicación se instale como una PWA (Progressive Web App):
+
+Abre el navegador de la tablet (Chrome en Android, Safari en iOS) y navega a la dirección IP del servidor.
+
+arduino
+Copiar código
+http://192.168.1.10:3000
+Instala la PWA:
+
+En Android (Chrome), verás un ícono para "Agregar a la pantalla de inicio" en el menú de opciones del navegador.
+En iOS (Safari), también puedes usar la opción "Agregar a la pantalla de inicio" desde el menú de compartir.
+Con estos pasos, las tablets deberían poder acceder al servidor y ejecutar la aplicación como una PWA.

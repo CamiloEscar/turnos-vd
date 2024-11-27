@@ -25,6 +25,21 @@ export interface Category {
   estimated_service_time: number;
 }
 
+export interface TechnicalNotes {
+  diagnosis: string;
+  solution?: string;
+  nextCheckDate?: string;
+  notes?: string;
+  status: 'pendiente' | 'en_proceso' | 'resuelto' | 'requiere_seguimiento';
+  claimDetails?: {
+    description: string;
+    severity: 'baja' | 'media' | 'alta' | 'crítica';
+    category: string;
+    resolution?: string;
+    followUpDate?: string;
+  };
+}
+
 export interface Ticket {
   id: number;
   number: string;
@@ -32,7 +47,7 @@ export interface Ticket {
   category_name?: string;
   category_type?: CategoryType;
   prefix?: string;
-  status: 'waiting' | 'serving' | 'completed';
+  status: 'waiting' | 'serving' | 'completed' | 'missed';
   sub_status?: string;
   counter?: number;
   priority: number;
@@ -45,6 +60,7 @@ export interface Ticket {
   customer_name?: string;
   contact_info?: string;
   additional_notes?: string;
+  technical_notes?: TechnicalNotes;
 }
 
 export interface Stats {
@@ -65,8 +81,17 @@ export interface Stats {
 export interface CreateTicketOptions {
   categoryId: number;
   customerName?: string;
+  status?: 'waiting' | 'in_progress' | 'completed';
   contactInfo?: string;
   additionalNotes?: string;
   complexityFactor?: number;
   estimatedTime?: number;
+  type?: CategoryType;
 }
+
+export type CounterType = {
+  id: number;
+  name: string;
+  type: 'regular' | 'tech';
+  color: string;
+};

@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useTicketStore } from "../lib/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,16 +24,46 @@ import {
   User,
   ChevronRight,
   AlertCircle,
+  Wrench,
+  Trash2,
+  Laptop,
+  Phone,
+  Volume2,
+  NotebookPen,
+  MessageSquare,
+  Eye,
+  Search,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
 import InternalChat from "@/components/InternalChat";
+import TechServiceDialog from "@/components/TechServiceDialog";
+import TechServiceNotes from "@/components/TechServiceNotes";
+import { useTimeInfo } from '@/hooks/useTimeInfo';
+import type { Ticket, CounterType } from "../lib/types";
+import { ComplaintDetails } from "@/components/complaint-details";
+import { Input } from "@/components/ui/input";
 
-export default function CounterView() {
-  const { tickets, fetchTickets, updateTicket, loading, error } =
-    useTicketStore();
+const COUNTER_TYPES: CounterType[] = [
+  { id: 1, name: 'Caja 1', type: 'regular', color: 'blue' },
+  { id: 2, name: 'Caja 2', type: 'regular', color: 'blue' },
+  { id: 3, name: 'Caja 3', type: 'regular', color: 'blue' },
+  { id: 4, name: 'Caja 4', type: 'regular', color: 'blue' },
+  { id: 5, name: 'Servicio Técnico 1', type: 'tech', color: 'amber' },
+  { id: 6, name: 'Servicio Técnico 2', type: 'tech', color: 'amber' }
+];
+
+export default function CombinedCounterView() {
+  const { tickets, fetchTickets, updateTicket, loading, error, deleteTicket } = useTicketStore();
   const [counterNumber, setCounterNumber] = useState(1);
   const [activeTab, setActiveTab] = useState("waiting");
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const [complaintDetailsOpen, setComplaintDetailsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pastTicketsOpen, setPastTicketsOpen] = useState(false);
+  const timeInfo = useTimeInfo(tickets);
 
   useEffect(() => {
     fetchTickets();
@@ -51,198 +81,398 @@ export default function CounterView() {
     }
   }, [error]);
 
-  const { waitingTickets, currentTicket, completedTickets, missedTickets } =
-    useMemo(
-      () => ({
-        waitingTickets: tickets.filter((t) => t.status === "waiting"),
-        currentTicket: tickets.find(
-          (t) => t.status === "serving" && t.counter === counterNumber
-        ),
-        completedTickets: tickets.filter(
-          (t) => t.status === "completed" && t.counter === counterNumber
-        ),
-        missedTickets: tickets.filter(
-          (t) => t.status === "missed" && t.counter === counterNumber
-        ),
+  const currentCounter = COUNTER_TYPES.find(c => c.id === counterNumber);
+  const isTechCounter = currentCounter?.type === 'tech';
+
+  const { waitingTickets, currentTicket, completedTickets, missedTickets } = useMemo(() => {
+    const techPrefixes = ['ST', 'PC', 'RE', 'RC'];
+  
+    return {
+      waitingTickets: tickets.filter((t) => {
+        const isWaiting = t.status === "waiting";
+        const prefix = t.number?.slice(0, 2);
+        
+        // Para Servicio Técnico
+        if (isTechCounter) {
+          return isWaiting && 
+                 (prefix && techPrefixes.includes(prefix) || 
+                  t.category_type === 'complaint') && 
+                 (!t.counter || t.counter === counterNumber || 
+                  (t.counter && t.counter >= 5 && t.counter <= 6));
+        } 
+        
+        // Para cajas regulares
+        return isWaiting && 
+               (!prefix || !techPrefixes.includes(prefix)) && 
+               (!t.counter || t.counter === counterNumber || 
+                (t.counter && t.counter >= 1 && t.counter <= 4));
       }),
-      [tickets, counterNumber]
-    );
-
-  const getTicketAge = useCallback((createdAt: string) => {
-    const created = new Date(createdAt);
-    const now = new Date();
-    return Math.floor((now.getTime() - created.getTime()) / (1000 * 60));
-  }, []);
-
-  const getCategoryIcon = useCallback((categoryId: number) => {
-    switch (categoryId) {
-      case 1:
-        return <Users className="h-4 w-4" />;
-      case 2:
-        return <Clock className="h-4 w-4" />;
-      case 3:
-        return <Bell className="h-4 w-4" />;
-      default:
-        return <Users className="h-4 w-4" />;
-    }
-  }, []);
-
-  const getCategoryColor = useCallback((categoryId: number) => {
-    switch (categoryId) {
-      case 1:
-        return "bg-blue-100 text-blue-800";
-      case 2:
-        return "bg-amber-100 text-amber-800";
-      case 3:
-        return "bg-emerald-100 text-emerald-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  }, []);
+      currentTicket: tickets.find(
+        (t) => t.status === "serving" && t.counter === counterNumber
+      ),
+      completedTickets: tickets.filter(
+        (t) => t.status === "completed" && t.counter === counterNumber
+      ),
+      missedTickets: tickets.filter(
+        (t) => t.status === "missed" && t.counter === counterNumber
+      ),
+    };
+  }, [tickets, counterNumber, isTechCounter]);
+  // Search and filter for past tickets
+  const filteredPastTickets = useMemo(() => {
+    return tickets.filter(ticket => 
+      (ticket.status === "completed" || ticket.status === "missed") &&
+      (
+        ticket.number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ticket.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ticket.category_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        ticket.contact_info?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    ).sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+  }, [tickets, searchQuery]);
 
   const handleUpdateTicket = useCallback(
-    async (ticketId: number, newStatus: string) => {
+    async (ticketId: number, newStatus: 'serving' | 'completed' | 'missed' | 'waiting', techData?: any) => {
       try {
-        await updateTicket(ticketId, newStatus as any, counterNumber);
+        if (newStatus === 'serving') {
+          const ticket = tickets.find(t => t.id === ticketId);
+          if (ticket) {
+            await callTicket(ticket);
+          }
+        }
+
+        await updateTicket(ticketId, newStatus, counterNumber, techData?.technical_notes);
+        
         toast({
           title: "Ticket actualizado",
-          description: `El ticket ha sido marcado como ${newStatus}`,
+          description: `El ticket ha sido ${
+            newStatus === 'completed' ? 'completado' : 
+            newStatus === 'missed' ? 'marcado como perdido' : 
+            'actualizado'
+          }`,
         });
+        
+        setSelectedTicket(null);
+        setDialogOpen(false);
       } catch (error) {
-        console.error("Error updating ticket:", error);
         toast({
           title: "Error",
-          description:
-            "No se pudo actualizar el ticket. Por favor, inténtelo de nuevo.",
+          description: "No se pudo actualizar el ticket. Por favor, inténtelo de nuevo.",
           variant: "destructive",
         });
       }
     },
-    [updateTicket, counterNumber]
+    [updateTicket, counterNumber, tickets]
   );
 
-  const renderTicketCard = useCallback(
-    (ticket: any, actions = true) => (
-      <Card
-        key={`ticket-${ticket.id}-${ticket.status}`}
-        className={`transition-all duration-200 border-l-4 ${
-          ticket.status === "serving"
-            ? "border-l-green-500 bg-green-50"
-            : ticket.status === "waiting"
-            ? "border-l-blue-500 hover:bg-blue-50"
-            : ticket.status === "missed"
-            ? "border-l-red-500 hover:bg-red-50"
-            : "border-l-gray-500 hover:bg-gray-50"
-        }`}
-      >
-        <CardContent className="flex items-center justify-between p-3">
-          <div className="flex items-center space-x-3">
-            <div className="flex-shrink-0">
-              <div
-                className={`rounded-full p-2 ${getCategoryColor(
-                  ticket.category_id
-                )}`}
-              >
-                {getCategoryIcon(ticket.category_id)}
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold">
-                  {ticket.number || "N/A"}
-                </span>
-                {ticket.customer_name && (
-                  <Badge variant="secondary" className="text-xs">
-                    <User className="h-3 w-3 mr-1" />
-                    {ticket.customer_name}
-                  </Badge>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <span className="">
-                {ticket.category_name || "N/A"}
-                </span>
-                <Badge
-                  variant="outline"
-                  className={
-                    ticket.status === "serving"
-                      ? "text-green-600 bg-green-100"
-                      : ticket.status === "waiting"
-                      ? "text-blue-600 bg-blue-100"
-                      : ticket.status === "missed"
-                      ? "text-red-600 bg-red-100"
-                      : "text-gray-600 bg-gray-100"
-                  }
-                >
-                  {ticket.status === "waiting" && "En espera"}
-                  {ticket.status === "serving" && "En atención"}
-                  {ticket.status === "completed" && "Completado"}
-                  {ticket.status === "missed" && "Perdido"}
-                </Badge>
-                <Badge variant="outline" className="text-gray-600">
-                  <Timer className="h-3 w-3 mr-1" />{" "}
-                  {getTicketAge(ticket.created_at)} min
-                </Badge>
-              </div>
+  const callTicket = useCallback(async (ticket: Ticket) => {
+    try {
+      const speech = new SpeechSynthesisUtterance(
+        `Ticket número ${ticket.number}, por favor acercarse a ${
+          isTechCounter ? `Servicio Técnico ${counterNumber - 4}` : `Caja ${counterNumber}`
+        }`
+      );
+      window.speechSynthesis.speak(speech);
+
+      try {
+        const audio = new Audio('/call-sound.mp3');
+        await audio.play();
+      } catch (audioError) {
+        console.warn('Error con el audio:', audioError);
+      }
+
+      toast({
+        title: "Llamando ticket",
+        description: `Llamando al ticket ${ticket.number}`,
+      });
+    } catch (error) {
+      console.error('Error al llamar ticket:', error);
+      toast({
+        title: "Ticket llamado",
+        description: `Ticket ${ticket.number} llamado (sin audio)`,
+      });
+    }
+  }, [counterNumber, isTechCounter]);
+
+  const handleNotesSubmit = async (data: any) => {
+    if (!selectedTicket) return;
+    try {
+      await updateTicket(selectedTicket.id, selectedTicket.status, counterNumber, data);
+      toast({
+        title: "Notas guardadas",
+        description: "Las notas técnicas han sido guardadas exitosamente",
+      });
+      setNotesDialogOpen(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudieron guardar las notas",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteTicket = async (ticketId: number) => {
+    try {
+      await deleteTicket(ticketId);
+      toast({
+        title: "Ticket eliminado",
+        description: "El ticket ha sido eliminado exitosamente",
+      });
+    } catch (error) {
+      console.error('Full delete error:', error);
+      toast({
+        title: "Error",
+        description: `No se pudo eliminar el ticket: ${error}`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const renderTicketInfo = (ticket: Ticket) => {
+    const waitTime = timeInfo.calculateWaitTime(ticket);
+    const isLongWait = waitTime > 30;
+
+    return (
+      <div className="flex items-center gap-2">
+        {ticket.status === "waiting" && (
+          <Badge 
+            variant="outline" 
+            className={`${isLongWait ? 'bg-red-50 text-red-700' : 'text-gray-600'}`}
+          >
+            <Clock className="h-3 w-3 mr-1" />
+            Espera: {timeInfo.getTimeString(waitTime)}
+          </Badge>
+        )}
+        <Badge variant="outline" className="text-gray-600">
+          <Timer className="h-3 w-3 mr-1" />
+          Estimado: {timeInfo.getTimeString(ticket.estimated_time)}
+        </Badge>
+      </div>
+    );
+  };
+
+  const renderTicketActions = (ticket: Ticket, isPastTicket = false) => (
+    <div className="flex items-center gap-2">
+      {!isPastTicket && renderTicketInfo(ticket)}
+      {ticket.status === "waiting" && !isPastTicket && (
+        <>
+          <Button
+            onClick={() => handleUpdateTicket(ticket.id, "serving")}
+            disabled={!!currentTicket || loading}
+            size="sm"
+            className={`bg-${currentCounter?.color}-500 hover:bg-${currentCounter?.color}-600 text-white border border-${currentCounter?.color}-600`}
+            style={{color: 'white'}} // Ensure text is white
+          >
+            <ChevronRight className="h-4 w-4 mr-1" />
+            {isTechCounter ? 'Atender' : 'Llamar'}
+          </Button>
+          <Button
+            onClick={() => {
+              setSelectedTicket(ticket);
+              setComplaintDetailsOpen(true);
+            }}
+            size="sm"
+            variant="outline"
+            className={`border-${currentCounter?.color}-200 hover:bg-${currentCounter?.color}-50 text-${currentCounter?.color}-700`}
+          >
+            <Eye className="h-4 w-4 mr-1" />
+            Ver detalles
+          </Button>
+          <Button
+            onClick={() => handleDeleteTicket(ticket.id)}
+            variant="destructive"
+            size="sm"
+            className="ml-2"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+      {ticket.status === "serving" && !isPastTicket && (
+        <>
+          <Button
+            onClick={() => handleUpdateTicket(ticket.id, "completed")}
+            size="sm"
+            className="bg-green-500 hover:bg-green-600 text-white"
+          >
+            <CheckCircle className="h-4 w-4" />
+          </Button>
+          <Button
+            onClick={() => {
+              setSelectedTicket(ticket);
+              setNotesDialogOpen(true);
+            }}
+            variant="outline"
+            size="sm"
+            className="border-amber-200 hover:bg-amber-50 text-amber-700"
+          >
+            <NotebookPen className="h-4 w-4 mr-1" />
+            Notas
+          </Button>
+          <Button
+            onClick={() => callTicket(ticket)}
+            variant="outline"
+            size="sm"
+            className="border-amber-200 hover:bg-amber-50 text-amber-700"
+          >
+            <Volume2 className="h-4 w-4 mr-1" />
+            Rellamar
+          </Button>
+          <Button
+            onClick={() => handleUpdateTicket(ticket.id, "missed")}
+            size="sm"
+            variant="destructive"
+          >
+            <AlertCircle className="h-4 w-4" />
+          </Button>
+          <Button
+            onClick={() => handleDeleteTicket(ticket.id)}
+            variant="destructive"
+            size="sm"
+            className="ml-2"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+      {ticket.status === "missed" && !isPastTicket && (
+        <>
+          <Button
+            onClick={() => handleUpdateTicket(ticket.id, "waiting")}
+            disabled={loading}
+            size="sm"
+            variant="outline"
+            className="border-red-200 hover:bg-red-50 text-red-700"
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+          <Button
+            onClick={() => handleDeleteTicket(ticket.id)}
+            variant="destructive"
+            size="sm"
+            className="ml-2"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+      {(ticket.status === "completed" || isPastTicket) && (
+        <>
+          <Button
+            onClick={() => {
+              setSelectedTicket(ticket);
+              setComplaintDetailsOpen(true);
+            }}
+            size="sm"
+            variant="outline"
+            className="border-green-200 hover:bg-green-50 text-green-700"
+          >
+            <Eye className="h-4 w-4 mr-1" />
+            Ver detalles
+          </Button>
+          {!isPastTicket && (
+            <Button
+              onClick={() => handleDeleteTicket(ticket.id)}
+              variant="destructive"
+              size="sm"
+              className="ml-2"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  );
+  const renderTicketCard = (ticket: Ticket, actions = true, isPastTicket = false) => (
+    <Card
+      key={`ticket-${ticket.id}-${ticket.status}`}
+      className={`transition-all duration-200 border-l-4 ${
+        ticket.status === "serving"
+          ? "border-l-green-500 bg-green-50"
+          : ticket.status === "waiting"
+          ? `border-l-${currentCounter?.color}-500 hover:bg-${currentCounter?.color}-50`
+          : ticket.status === "missed"
+          ? "border-l-red-500 hover:bg-red-50"
+          : "border-l-gray-500 hover:bg-gray-50"
+      }`}
+    >
+      <CardContent className="flex items-center justify-between p-3">
+        <div className="flex items-center space-x-3">
+          <div className="flex-shrink-0">
+            <div
+              className={`rounded-full p-2 ${
+                ticket.category_type === 'complaint' ? 'bg-red-100 text-red-800' :
+                isTechCounter ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+              }`}
+            >
+              {ticket.category_type === 'complaint' ? <MessageSquare className="h-4 w-4" /> :
+               isTechCounter ? <Laptop className="h-4 w-4" /> : <Users className="h-4 w-4" />}
             </div>
           </div>
-          {actions && (
+          <div>
             <div className="flex items-center gap-2">
-              {ticket.status === "waiting" && (
-                <Button
-                  onClick={() => handleUpdateTicket(ticket.id, "serving")}
-                  disabled={!!currentTicket || loading}
-                  size="sm"
-                  className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50"
-                >
-                  <ChevronRight className="h-4 w-4 mr-1" />
-                  Llamar
-                </Button>
-              )}
-              {ticket.status === "serving" && (
-                <>
-                  <Button
-                    onClick={() => handleUpdateTicket(ticket.id, "completed")}
-                    disabled={loading}
-                    size="sm"
-                    className="bg-green-500 hover:bg-green-600"
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    onClick={() => handleUpdateTicket(ticket.id, "missed")}
-                    disabled={loading}
-                    size="sm"
-                    variant="destructive"
-                  >
-                    <AlertCircle className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-              {ticket.status === "missed" && (
-                <Button
-                  onClick={() => handleUpdateTicket(ticket.id, "waiting")}
-                  disabled={loading}
-                  size="sm"
-                  variant="outline"
-                  className="border-red-200 hover:bg-red-50"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </Button>
+              <span className="text-2xl font-bold">
+                {ticket.number || "N/A"}
+              </span>
+              {ticket.customer_name && (
+                <Badge variant="secondary" className="text-xs">
+                  <User className="h-3 w-3 mr-1" />
+                  {ticket.customer_name}
+                </Badge>
               )}
             </div>
-          )}
-        </CardContent>
-      </Card>
-    ),
-    [
-      getCategoryColor,
-      getCategoryIcon,
-      getTicketAge,
-      handleUpdateTicket,
-      currentTicket,
-      loading,
-    ]
+            <div className="flex items-center gap-2 text-sm">
+              <span className="font-medium">
+                {ticket.category_name}
+                {ticket.category_type === 'complaint' && (
+                  <Badge variant="outline" className="ml-2 bg-red-50 text-red-800">
+                    <AlertTriangle className="h-3 w-3 mr-1" />
+                    Reclamo
+                  </Badge>
+                )}
+              </span>
+              <Badge
+                variant="outline"
+                className={
+                  ticket.status === "serving"
+                    ? "text-green-600 bg-green-100"
+                    : ticket.status === "waiting"
+                    ? `text-${currentCounter?.color}-600 bg-${currentCounter?.color}-100`
+                    : ticket.status === "missed"
+                    ? "text-red-600 bg-red-100"
+                    : "text-gray-600 bg-gray-100"
+                }
+              >
+                {ticket.status === "waiting" && "En espera"}
+                {ticket.status === "serving" && "En atención"}
+                {ticket.status === "completed" && "Completado"}
+                {ticket.status === "missed" && "Perdido"}
+              </Badge>
+            </div>
+            {ticket.contact_info && (
+              <div className="flex items-center gap-2 text-sm mt-1">
+                <Phone className="h-3 w-3" />
+                <span>{ticket.contact_info}</span>
+              </div>
+            )}
+            {ticket.additional_notes && (
+              <p className="text-sm text-gray-600 mt-1">
+                {ticket.additional_notes}
+              </p>
+            )}
+            {ticket.technical_notes?.diagnosis && (
+              <div className="mt-2 p-2 bg-gray-50 rounded-md">
+                <p className="text-sm font-medium text-gray-700">Diagnóstico:</p>
+                <p className="text-sm text-gray-600">{ticket.technical_notes.diagnosis}</p>
+              </div>
+            )}
+          </div>
+        </div>
+        {actions && renderTicketActions(ticket, isPastTicket)}
+      </CardContent>
+    </Card>
   );
 
   return (
@@ -257,18 +487,24 @@ export default function CounterView() {
                 value={counterNumber.toString()}
                 onValueChange={(value) => setCounterNumber(Number(value))}
               >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Seleccionar módulo" />
+                <SelectTrigger className={`w-[200px] bg-${currentCounter?.color}-100 text-${currentCounter?.color}-800`}>
+                  <SelectValue placeholder="Seleccionar caja" />
                 </SelectTrigger>
                 <SelectContent>
-                  {[1, 2, 3, 4].map((num) => (
-                    <SelectItem key={`counter-${num}`} value={num.toString()}>
-                      Módulo {num}
+                  {COUNTER_TYPES.map((counter) => (
+                    <SelectItem 
+                      key={`counter-${counter.id}`} 
+                      value={counter.id.toString()}
+                      className={counter.type === 'tech' ? 'text-amber-600' : 'text-blue-600'}
+                    >
+                      {counter.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <h1 className="text-2xl font-bold">Panel de Atención</h1>
+              <h1 className="text-2xl font-bold">
+                {isTechCounter ? 'Panel de Servicio Técnico' : 'Panel de Atención'}
+              </h1>
             </div>
             {loading && (
               <Badge variant="outline" className="animate-pulse">
@@ -278,10 +514,10 @@ export default function CounterView() {
           </div>
 
           {/* Current Ticket Section */}
-          <Card className="border-2 border-green-200 bg-green-50">
+          <Card className={`border-2 border-${currentCounter?.color}-200 bg-${currentCounter?.color}-50`}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg text-green-800">
-                Turno Actual
+              <CardTitle className={`text-lg text-${currentCounter?.color}-800`}>
+                {isTechCounter ? 'Caso en Atención' : 'Turno Actual'}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -289,10 +525,10 @@ export default function CounterView() {
                 renderTicketCard(currentTicket)
               ) : (
                 <div className="text-center py-8 text-gray-500">
-                  <Bell className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                  <p>No hay turno en atención</p>
+                  {isTechCounter ? <Wrench className="h-8 w-8 mx-auto mb-2 text-gray-400" /> : <Bell className="h-8 w-8 mx-auto mb-2 text-gray-400" />}
+                  <p>No hay {isTechCounter ? 'caso' : 'turno'} en atención</p>
                   <p className="text-sm">
-                    Seleccione "Llamar" en un turno pendiente para comenzar
+                    Seleccione "{isTechCounter ? 'Atender' : 'Llamar'}" en un {isTechCounter ? 'caso' : 'turno'} pendiente para comenzar
                   </p>
                 </div>
               )}
@@ -310,7 +546,7 @@ export default function CounterView() {
                 <TabsList className="grid w-full grid-cols-3 mb-4">
                   <TabsTrigger
                     value="waiting"
-                    className="data-[state=active]:bg-blue-100 data-[state=active]:text-blue-800"
+                    className={`data-[state=active]:bg-${currentCounter?.color}-100 data-[state=active]:text-${currentCounter?.color}-800`}
                   >
                     <AlertTriangle className="h-4 w-4 mr-2" />
                     Pendientes ({waitingTickets.length})
@@ -323,7 +559,7 @@ export default function CounterView() {
                     Perdidos ({missedTickets.length})
                   </TabsTrigger>
                   <TabsTrigger
-                    value="recent"
+                    value="completed"
                     className="data-[state=active]:bg-green-100 data-[state=active]:text-green-800"
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
@@ -335,14 +571,10 @@ export default function CounterView() {
                   {waitingTickets.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p>No hay turnos en espera</p>
+                      <p>No hay {isTechCounter ? 'casos' : 'turnos'} en espera</p>
                     </div>
                   ) : (
-                    waitingTickets.map((ticket, index) => (
-                      <React.Fragment key={`waiting-${ticket.id}-${index}`}>
-                        {renderTicketCard(ticket)}
-                      </React.Fragment>
-                    ))
+                    waitingTickets.map((ticket) => renderTicketCard(ticket))
                   )}
                 </TabsContent>
 
@@ -350,29 +582,21 @@ export default function CounterView() {
                   {missedTickets.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <Archive className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p>No hay turnos perdidos</p>
+                      <p>No hay {isTechCounter ? 'casos' : 'turnos'} perdidos</p>
                     </div>
                   ) : (
-                    missedTickets.map((ticket, index) => (
-                      <React.Fragment key={`missed-${ticket.id}-${index}`}>
-                        {renderTicketCard(ticket)}
-                      </React.Fragment>
-                    ))
+                    missedTickets.map((ticket) => renderTicketCard(ticket))
                   )}
                 </TabsContent>
 
-                <TabsContent value="recent" className="space-y-2">
+                <TabsContent value="completed" className="space-y-2">
                   {completedTickets.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <CheckCircle className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                      <p>No hay turnos completados</p>
+                      <p>No hay {isTechCounter ? 'casos' : 'turnos'} completados</p>
                     </div>
                   ) : (
-                    completedTickets.map((ticket, index) => (
-                      <React.Fragment key={`completed-${ticket.id}-${index}`}>
-                        {renderTicketCard(ticket, false)}
-                      </React.Fragment>
-                    ))
+                    completedTickets.map((ticket) => renderTicketCard(ticket, false))
                   )}
                 </TabsContent>
               </Tabs>
@@ -388,26 +612,34 @@ export default function CounterView() {
                 <Archive className="h-5 w-5 mr-2 text-gray-600" />
                 Resumen del Día
               </CardTitle>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setPastTicketsOpen(!pastTicketsOpen)}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Buscar Turnos
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Card className="bg-blue-50 border-blue-200">
+              <Card className={`bg-${currentCounter?.color}-50 border-${currentCounter?.color}-200`}>
                 <CardContent className="p-4 flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-blue-800 font-medium">
+                    <p className={`text-sm text-${currentCounter?.color}-800 font-medium`}>
                       En Espera
                     </p>
-                    <p className="text-3xl font-bold text-blue-700">
+                    <p className={`text-3xl font-bold text-${currentCounter?.color}-700`}>
                       {waitingTickets.length}
                     </p>
                   </div>
-                  <AlertTriangle className="h-8 w-8 text-blue-600" />
+                  <AlertTriangle className={`h-8 w-8 text-${currentCounter?.color}-600`} />
                 </CardContent>
               </Card>
               <Card className="bg-green-50 border-green-200">
                 <CardContent className="p-4 flex items-center justify-between">
                   <div>
                     <p className="text-sm text-green-800 font-medium">
-                      Turnos Completados
+                      {isTechCounter ? 'Casos' : 'Turnos'} Completados
                     </p>
                     <p className="text-2xl font-bold text-green-700">
                       {completedTickets.length}
@@ -420,7 +652,7 @@ export default function CounterView() {
                 <CardContent className="p-4 flex items-center justify-between">
                   <div>
                     <p className="text-sm text-red-800 font-medium">
-                      Turnos Perdidos
+                      {isTechCounter ? 'Casos' : 'Turnos'} Perdidos
                     </p>
                     <p className="text-2xl font-bold text-red-700">
                       {missedTickets.length}
@@ -440,7 +672,7 @@ export default function CounterView() {
                         ? `${Math.round(
                             completedTickets.reduce(
                               (sum, ticket) =>
-                                sum + getTicketAge(ticket.created_at),
+                                sum + timeInfo.calculateWaitTime(ticket),
                               0
                             ) / completedTickets.length
                           )} min`
@@ -451,10 +683,69 @@ export default function CounterView() {
                 </CardContent>
               </Card>
             </CardContent>
-          <InternalChat currentModule={`Módulo ${counterNumber}`} />
+            <InternalChat currentModule={`${isTechCounter ? 'Técnico' : 'Caja'} ${counterNumber}`} />
           </Card>
         </div>
       </div>
+
+      {/* Past Tickets Search Modal */}
+      {pastTicketsOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <Card className="w-[90%] max-w-4xl max-h-[90vh] flex flex-col">
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Input 
+                  placeholder="Buscar turnos pasados..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-grow"
+                />
+                <Button variant="outline" onClick={() => setPastTicketsOpen(false)}>
+                  Cerrar
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="overflow-y-auto">
+              {filteredPastTickets.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Search className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                  <p>No se encontraron turnos</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredPastTickets.map((ticket) => renderTicketCard(ticket, true, true))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Diálogos para todos los tipos de tickets */}
+      {selectedTicket && (
+        <>
+          <TechServiceDialog
+            ticket={selectedTicket}
+            isOpen={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSubmit={(data) => handleUpdateTicket(selectedTicket.id, "serving", data)}
+            onDelete={() => handleDeleteTicket(selectedTicket.id)}
+            onRecall={() => callTicket(selectedTicket)}
+          />
+          <TechServiceNotes
+            ticket={selectedTicket}
+            isOpen={notesDialogOpen}
+            onOpenChange={setNotesDialogOpen}
+            onSubmit={handleNotesSubmit}
+          />
+          <ComplaintDetails
+            ticket={selectedTicket}
+            isOpen={complaintDetailsOpen}
+            onOpenChange={setComplaintDetailsOpen}
+          />
+        </>
+      )}
     </div>
   );
 }
+
